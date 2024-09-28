@@ -1670,9 +1670,9 @@ const betafishEngine = function() {
   // initTables()
 
   // King Safety Evaluation Constants
-const PAWN_SHIELD_BONUS = 20; // Bonus for having a pawn near the king
-const KING_SAFETY_PENALTY = 30; // Penalty for exposed king
-const KING_ATTACK_MULTIPLIER = 50; // Bonus for attacking opponent's king
+const PAWN_SHIELD_BONUS = 10; // Bonus for having a pawn near the king
+const KING_SAFETY_PENALTY = 10; // Penalty for exposed king
+const KING_ATTACK_MULTIPLIER = 20; // Bonus for attacking opponent's king
 
 function EvalPosition() {
   let gamePhase = 0;
