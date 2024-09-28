@@ -1669,61 +1669,62 @@ const betafishEngine = function() {
 
   // initTables()
 
-  function EvalPosition() {
-    let gamePhase = 0;
-    let mg_score = 0;  // Midgame score
-    let eg_score = 0;  // Endgame score
-  
-    // King Safety Evaluation Constants
-    const KING_SAFETY_PENALTY = 30; // Penalty for exposed king
-    const PAWN_SHIELD_BONUS = 20;   // Bonus for pawns around the king
-    const KING_ATTACK_MULTIPLIER = 50; // Bonus for attacking opponent's king
-    
-    let whiteKingSafety = 0;
-    let blackKingSafety = 0;
-  
-    // Material & Positional evaluation
-    for (pce in PIECES) {
-      for (pceNum = 0; pceNum < GameBoard.pceNum[PIECES[pce]]; pceNum++) {
-        let sq = GameBoard.pList[getPieceIndex(PIECES[pce], pceNum)];
-        if (pce[0] == "w") {
-          mg_score += mg_value[pce] + mg_pesto_table[pce][mirror64(sq120to64(sq))];
-          eg_score += eg_value[pce] + eg_pesto_table[pce][mirror64(sq120to64(sq))];
-          gamePhase += gamephaseInc[pce];
-          
-          // Additional logic for white king safety
-          if (pce === 'wK') {
-            whiteKingSafety = evaluateKingSafety(sq, COLOURS.WHITE);
-          }
-        } else {
-          mg_score -= mg_value[pce] + mg_pesto_table[pce][sq120to64(sq)];
-          eg_score -= eg_value[pce] + eg_pesto_table[pce][sq120to64(sq)];
-          gamePhase += gamephaseInc[pce];
-          
-          // Additional logic for black king safety
-          if (pce === 'bK') {
-            blackKingSafety = evaluateKingSafety(sq, COLOURS.BLACK);
-          }
+  // King Safety Evaluation Constants
+const PAWN_SHIELD_BONUS = 20; // Bonus for having a pawn near the king
+const KING_SAFETY_PENALTY = 30; // Penalty for exposed king
+const KING_ATTACK_MULTIPLIER = 50; // Bonus for attacking opponent's king
+
+function EvalPosition() {
+  let gamePhase = 0;
+  let mg_score = 0;  // Midgame score
+  let eg_score = 0;  // Endgame score
+
+  let whiteKingSafety = 0;
+  let blackKingSafety = 0;
+
+  // Material & Positional evaluation
+  for (pce in PIECES) {
+    for (pceNum = 0; pceNum < GameBoard.pceNum[PIECES[pce]]; pceNum++) {
+      let sq = GameBoard.pList[getPieceIndex(PIECES[pce], pceNum)];
+      if (pce[0] == "w") {
+        mg_score += mg_value[pce] + mg_pesto_table[pce][mirror64(sq120to64(sq))];
+        eg_score += eg_value[pce] + eg_pesto_table[pce][mirror64(sq120to64(sq))];
+        gamePhase += gamephaseInc[pce];
+        
+        // Additional logic for white king safety
+        if (pce === 'wK') {
+          whiteKingSafety = evaluateKingSafety(sq, COLOURS.WHITE);
+        }
+      } else {
+        mg_score -= mg_value[pce] + mg_pesto_table[pce][sq120to64(sq)];
+        eg_score -= eg_value[pce] + eg_pesto_table[pce][sq120to64(sq)];
+        gamePhase += gamephaseInc[pce];
+        
+        // Additional logic for black king safety
+        if (pce === 'bK') {
+          blackKingSafety = evaluateKingSafety(sq, COLOURS.BLACK);
         }
       }
     }
-  
-    // King safety impacts the score
-    mg_score -= whiteKingSafety; // Penalize white's king safety issues
-    mg_score += blackKingSafety; // Penalize black's king safety issues (negative for opponent)
-  
-    // Game phase adjustment
-    let mg_phase = gamePhase;
-    let eg_phase = 24 - gamePhase;
-    let score = (mg_score * mg_phase + eg_score * eg_phase) / 24;
-  
-    if (GameBoard.side == COLOURS.WHITE) {
-      return score;
-    } else {
-      return -score;
-    }
   }
-  // King Safety Evaluation function
+
+  // King safety impacts the score
+  mg_score -= whiteKingSafety; // Penalize white's king safety issues
+  mg_score += blackKingSafety; // Penalize black's king safety issues (negative for opponent)
+
+  // Game phase adjustment
+  let mg_phase = gamePhase;
+  let eg_phase = 24 - gamePhase;
+  let score = (mg_score * mg_phase + eg_score * eg_phase) / 24;
+
+  if (GameBoard.side == COLOURS.WHITE) {
+    return score;
+  } else {
+    return -score;
+  }
+}
+
+// King Safety Evaluation function
 function evaluateKingSafety(kingSquare, side) {
   let kingSafetyScore = 0;
 
@@ -1743,6 +1744,8 @@ function evaluateKingSafety(kingSquare, side) {
 
   return kingSafetyScore;
 }
+
+// Function to get adjacent squares to the king
 function getKingAdjacentSquares(kingSquare) {
   let adjacentSquares = [];
   // Add squares directly surrounding the king
@@ -1774,6 +1777,7 @@ function evaluateKingAttacks(kingSquare, side) {
 
   return attackScore;
 }
+
   /****************************\
    ============================
    
