@@ -22,8 +22,6 @@ const betafishEngine = function() {
   const MFLAGCAP = 0x7c000;
   const MFLAGPROM = 0xf00000;
   const NOMOVE = 0;
-  const TT_SIZE = 1000000;  // Ukuran Transposition Table
-  const TransTable = new Array(TT_SIZE);
 
   // prettier-ignore
   const CastlePerm = [
@@ -1672,58 +1670,110 @@ const betafishEngine = function() {
   // initTables()
 
   function EvalPosition() {
-    let score = 0;
     let gamePhase = 0;
-    let mg_score = 0;
-    let eg_score = 0;
-
-    for (let pce in PIECES) {
-        for (let pceNum = 0; pceNum < GameBoard.pceNum[PIECES[pce]]; pceNum++) {
-            let sq = GameBoard.pList[getPieceIndex(PIECES[pce], pceNum)];
-            if (pce[0] === 'w') {
-                mg_score += mg_value[pce] + mg_pesto_table[pce][mirror64(sq120to64(sq))];
-                eg_score += eg_value[pce] + eg_pesto_table[pce][mirror64(sq120to64(sq))];
-            } else {
-                mg_score -= mg_value[pce] + mg_pesto_table[pce][sq120to64(sq)];
-                eg_score -= eg_value[pce] + eg_pesto_table[pce][sq120to64(sq)];
-            }
+    let mg_score = 0;  // Midgame score
+    let eg_score = 0;  // Endgame score
+  
+    // King Safety Evaluation Constants
+    const KING_SAFETY_PENALTY = 30; // Penalty for exposed king
+    const PAWN_SHIELD_BONUS = 20;   // Bonus for pawns around the king
+    const KING_ATTACK_MULTIPLIER = 50; // Bonus for attacking opponent's king
+    
+    let whiteKingSafety = 0;
+    let blackKingSafety = 0;
+  
+    // Material & Positional evaluation
+    for (pce in PIECES) {
+      for (pceNum = 0; pceNum < GameBoard.pceNum[PIECES[pce]]; pceNum++) {
+        let sq = GameBoard.pList[getPieceIndex(PIECES[pce], pceNum)];
+        if (pce[0] == "w") {
+          mg_score += mg_value[pce] + mg_pesto_table[pce][mirror64(sq120to64(sq))];
+          eg_score += eg_value[pce] + eg_pesto_table[pce][mirror64(sq120to64(sq))];
+          gamePhase += gamephaseInc[pce];
+          
+          // Additional logic for white king safety
+          if (pce === 'wK') {
+            whiteKingSafety = evaluateKingSafety(sq, COLOURS.WHITE);
+          }
+        } else {
+          mg_score -= mg_value[pce] + mg_pesto_table[pce][sq120to64(sq)];
+          eg_score -= eg_value[pce] + eg_pesto_table[pce][sq120to64(sq)];
+          gamePhase += gamephaseInc[pce];
+          
+          // Additional logic for black king safety
+          if (pce === 'bK') {
+            blackKingSafety = evaluateKingSafety(sq, COLOURS.BLACK);
+          }
         }
+      }
     }
+  
+    // King safety impacts the score
+    mg_score -= whiteKingSafety; // Penalize white's king safety issues
+    mg_score += blackKingSafety; // Penalize black's king safety issues (negative for opponent)
+  
+    // Game phase adjustment
+    let mg_phase = gamePhase;
+    let eg_phase = 24 - gamePhase;
+    let score = (mg_score * mg_phase + eg_score * eg_phase) / 24;
+  
+    if (GameBoard.side == COLOURS.WHITE) {
+      return score;
+    } else {
+      return -score;
+    }
+  }
+  // King Safety Evaluation function
+function evaluateKingSafety(kingSquare, side) {
+  let kingSafetyScore = 0;
 
-    mg_phase = gamePhase;
-    eg_phase = 24 - gamePhase;
-    score = (mg_score * mg_phase + eg_score * eg_phase) / 24;
+  // Check pawn shield (king's position and surrounding pawns)
+  let adjacentSquares = getKingAdjacentSquares(kingSquare);
+  
+  adjacentSquares.forEach(sq => {
+    if (GameBoard.pieces[sq] === (side === COLOURS.WHITE ? PIECES.wP : PIECES.bP)) {
+      kingSafetyScore -= PAWN_SHIELD_BONUS; // Bonus for having a pawn near the king
+    } else if (GameBoard.pieces[sq] === PIECES.EMPTY) {
+      kingSafetyScore += KING_SAFETY_PENALTY; // Penalty for empty space around king
+    }
+  });
 
-    // Tambahkan evaluasi tambahan
-    score += EvaluateKingSafety();
-    score += EvaluatePawnStructure();
-    score += EvaluatePieceActivity();
+  // Additional bonus for attacking the opponent's king (if close to enemy pieces)
+  kingSafetyScore += evaluateKingAttacks(kingSquare, side);
 
-    return GameBoard.side === COLOURS.WHITE ? score : -score;
+  return kingSafetyScore;
+}
+function getKingAdjacentSquares(kingSquare) {
+  let adjacentSquares = [];
+  // Add squares directly surrounding the king
+  let offsets = [-1, 1, -10, 10, -11, -9, 11, 9];
+  offsets.forEach(offset => {
+    let adjSq = kingSquare + offset;
+    if (!isSqOffBoard(adjSq)) {
+      adjacentSquares.push(adjSq);
+    }
+  });
+  return adjacentSquares;
+}
+
+// Function to reward attacking the enemy king
+function evaluateKingAttacks(kingSquare, side) {
+  let attackScore = 0;
+  let enemyPieces = GameBoard.side === COLOURS.WHITE ? PIECES.BLACK : PIECES.WHITE;
+
+  for (let pceType = PIECES.wP; pceType <= PIECES.bK; pceType++) {
+    for (let pceNum = 0; pceNum < GameBoard.pceNum[pceType]; pceNum++) {
+      let sq = GameBoard.pList[getPieceIndex(pceType, pceNum)];
+      if (PieceCol[GameBoard.pieces[sq]] === (side ^ 1)) {
+        if (SqAttacked(kingSquare, side ^ 1)) {
+          attackScore += KING_ATTACK_MULTIPLIER; // Bonus for attacking the opponent's king
+        }
+      }
+    }
   }
 
-  // Evaluasi King Safety
-  function EvaluateKingSafety() {
-      let safetyScore = 0;
-      // Implementasi logika untuk penalti posisi raja yang berbahaya
-      return safetyScore;
-  }
-
-  // Evaluasi Struktur Pion
-  function EvaluatePawnStructure() {
-      let pawnStructureScore = 0;
-      // Penalti untuk isolated, doubled, atau backward pawns
-      return pawnStructureScore;
-  }
-
-  // Evaluasi Aktivitas Bidak
-  function EvaluatePieceActivity() {
-      let activityScore = 0;
-      // Tambahkan bonus untuk rook pada open file, dan bishop pada long diagonals
-      return activityScore;
-  }
-
-
+  return attackScore;
+}
   /****************************\
    ============================
    
@@ -1762,21 +1812,6 @@ const betafishEngine = function() {
     return NOMOVE;
   }
 
-  function StoreInTransTable(posKey, depth, score, flag) {
-    let index = posKey % TT_SIZE;
-    TransTable[index] = { posKey, depth, score, flag };  // Simpan posisi, kedalaman, skor, dan flag
-  }
-  function ProbeTransTable(posKey, depth, alpha, beta) {
-    let index = posKey % TT_SIZE;
-    let entry = TransTable[index];
-
-    if (entry && entry.posKey === posKey && entry.depth >= depth) {
-        if (entry.flag === 'EXACT') return entry.score;
-        if (entry.flag === 'ALPHA' && entry.score <= alpha) return alpha;
-        if (entry.flag === 'BETA' && entry.score >= beta) return beta;
-    }
-    return null;  // Tidak ada entri valid
-  }
   function StorePvMove(move) {
     var index = GameBoard.posKey % PVENTRIES;
     GameBoard.PvTable[index].posKey = GameBoard.posKey;
@@ -1797,25 +1832,32 @@ const betafishEngine = function() {
   SearchController.endgame;
 
   function PickNextMove(MoveNum) {
-    let bestScore = -Infinity;
-    let bestIndex = MoveNum;
+    var index = 0;
+    var bestScore = -1;
+    var bestNum = MoveNum;
 
-    for (let index = MoveNum; index < GameBoard.moveListStart[GameBoard.ply + 1]; ++index) {
-        if (GameBoard.moveScores[index] > bestScore) {
-            bestScore = GameBoard.moveScores[index];
-            bestIndex = index;
-        }
+    for (
+      index = MoveNum;
+      index < GameBoard.moveListStart[GameBoard.ply + 1];
+      ++index
+    ) {
+      if (GameBoard.moveScores[index] > bestScore) {
+        bestScore = GameBoard.moveScores[index];
+        bestNum = index;
+      }
     }
 
-    // Tukar langkah terbaik ke depan
-    if (bestIndex !== MoveNum) {
-        [GameBoard.moveScores[MoveNum], GameBoard.moveScores[bestIndex]] =
-            [GameBoard.moveScores[bestIndex], GameBoard.moveScores[MoveNum]];
+    if (bestNum != MoveNum) {
+      var temp = 0;
+      temp = GameBoard.moveScores[MoveNum];
+      GameBoard.moveScores[MoveNum] = GameBoard.moveScores[bestNum];
+      GameBoard.moveScores[bestNum] = temp;
 
-        [GameBoard.moveList[MoveNum], GameBoard.moveList[bestIndex]] =
-            [GameBoard.moveList[bestIndex], GameBoard.moveList[MoveNum]];
+      temp = GameBoard.moveList[MoveNum];
+      GameBoard.moveList[MoveNum] = GameBoard.moveList[bestNum];
+      GameBoard.moveList[bestNum] = temp;
     }
-}
+  }
 
   function ClearPvTable() {
     for (index = 0; index < PVENTRIES; index++) {
@@ -1847,125 +1889,188 @@ const betafishEngine = function() {
   }
 
   function Quiescence(alpha, beta) {
-    if ((SearchController.nodes & 2047) === 0) {
-        CheckUp();  // Cek batas waktu
-    }
-
-    SearchController.nodes++;
-
-    let stand_pat = EvalPosition();
-    if (stand_pat >= beta) {
-        return beta;
-    }
-    if (alpha < stand_pat) {
-        alpha = stand_pat;
-    }
-
-    GenerateCaptures();  // Hanya menangani langkah capture
-
-    for (let moveNum = GameBoard.moveListStart[GameBoard.ply]; moveNum < GameBoard.moveListStart[GameBoard.ply + 1]; ++moveNum) {
-        PickNextMove(moveNum);  // Urutkan langkah untuk meningkatkan pruning
-        let move = GameBoard.moveList[moveNum];
-
-        if (!MakeMove(move)) continue;  // Proses hanya langkah legal
-        let score = -Quiescence(-beta, -alpha);
-        TakeMove();
-
-        if (SearchController.stop) return 0;  // Berhenti jika waktu habis
-
-        if (score >= beta) return beta;
-        if (score > alpha) alpha = score;
-    }
-    return alpha;
-  }
-
-  function AlphaBeta(alpha, beta, depth) {
-    let TTScore = ProbeTransTable(GameBoard.posKey, depth, alpha, beta);
-    if (TTScore !== null) return TTScore;  // Jika ditemukan skor di Transposition Table, gunakan itu
-
-    if (depth <= 0) {
-        return Quiescence(alpha, beta);
-    }
-
-    if ((SearchController.nodes & 2047) === 0) {
-        CheckUp();  // Cek batas waktu
+    if ((SearchController.nodes & 2047) == 0) {
+      CheckUp();
     }
 
     SearchController.nodes++;
 
     if ((IsRepetition() || GameBoard.fiftyMove >= 100) && GameBoard.ply != 0) {
-        return 0;
+      return 0;
     }
 
     if (GameBoard.ply > MAXDEPTH - 1) {
-        return EvalPosition();
+      return EvalPosition();
     }
 
-    let InCheck = SqAttacked(
-        GameBoard.pList[getPieceIndex(Kings[GameBoard.side], 0)],
-        GameBoard.side ^ 1
-    );
-    if (InCheck) depth++;
+    var Score = EvalPosition();
 
-    let score = -INFINITE;
+    if (Score >= beta) {
+      return beta;
+    }
 
-    GenerateMoves();
+    if (Score > alpha) {
+      alpha = Score;
+    }
 
-    let MoveNum = 0;
-    let Legal = 0;
-    let OldAlpha = alpha;
-    let BestMove = NOMOVE;
-    let Move = NOMOVE;
+    GenerateCaptures();
 
-    let PvMove = ProbePvTable();
-    if (PvMove !== NOMOVE) {
-        for (MoveNum = GameBoard.moveListStart[GameBoard.ply]; MoveNum < GameBoard.moveListStart[GameBoard.ply + 1]; ++MoveNum) {
-            if (GameBoard.moveList[MoveNum] === PvMove) {
-                GameBoard.moveScores[MoveNum] = 2000000;
-                break;
-            }
+    var MoveNum = 0;
+    var Legal = 0;
+    var OldAlpha = alpha;
+    var BestMove = NOMOVE;
+    var Move = NOMOVE;
+
+    for (
+      MoveNum = GameBoard.moveListStart[GameBoard.ply];
+      MoveNum < GameBoard.moveListStart[GameBoard.ply + 1];
+      ++MoveNum
+    ) {
+      PickNextMove(MoveNum);
+
+      Move = GameBoard.moveList[MoveNum];
+
+      if (MakeMove(Move) == false) {
+        continue;
+      }
+      Legal++;
+      Score = -Quiescence(-beta, -alpha);
+
+      TakeMove();
+
+      if (SearchController.stop == true) {
+        return 0;
+      }
+
+      if (Score > alpha) {
+        if (Score >= beta) {
+          if (Legal == 1) {
+            SearchController.fhf++;
+          }
+          SearchController.fh++;
+          return beta;
         }
-    }
-
-    for (MoveNum = GameBoard.moveListStart[GameBoard.ply]; MoveNum < GameBoard.moveListStart[GameBoard.ply + 1]; ++MoveNum) {
-        PickNextMove(MoveNum);
-
-        Move = GameBoard.moveList[MoveNum];
-
-        if (!MakeMove(Move)) continue;
-        Legal++;
-        score = -AlphaBeta(-beta, -alpha, depth - 1);
-        TakeMove();
-
-        if (SearchController.stop) return 0;
-
-        if (score > alpha) {
-            if (score >= beta) {
-                if (Legal == 1) {
-                    SearchController.fhf++;
-                }
-                SearchController.fh++;
-                StoreInTransTable(GameBoard.posKey, depth, beta, 'BETA');
-                return beta;
-            }
-            alpha = score;
-            BestMove = Move;
-        }
-    }
-
-    if (Legal == 0) {
-        return InCheck ? -MATE + GameBoard.ply : 0;
+        alpha = Score;
+        BestMove = Move;
+      }
     }
 
     if (alpha != OldAlpha) {
-        StoreInTransTable(GameBoard.posKey, depth, alpha, 'EXACT');
-    } else {
-        StoreInTransTable(GameBoard.posKey, depth, alpha, 'ALPHA');
+      StorePvMove(BestMove);
     }
 
     return alpha;
   }
 
+  function AlphaBeta(alpha, beta, depth) {
+    if (depth <= 0) {
+      return Quiescence(alpha, beta);
+    }
+
+    if ((SearchController.nodes & 2047) == 0) {
+      CheckUp();
+    }
+
+    SearchController.nodes++;
+
+    if ((IsRepetition() || GameBoard.fiftyMove >= 100) && GameBoard.ply != 0) {
+      return 0;
+    }
+
+    if (GameBoard.ply > MAXDEPTH - 1) {
+      return EvalPosition();
+    }
+
+    var InCheck = SqAttacked(
+      GameBoard.pList[getPieceIndex(Kings[GameBoard.side], 0)],
+      GameBoard.side ^ 1
+    );
+    if (InCheck == true) {
+      depth++;
+    }
+
+    var Score = -INFINITE;
+
+    GenerateMoves();
+
+    var MoveNum = 0;
+    var Legal = 0;
+    var OldAlpha = alpha;
+    var BestMove = NOMOVE;
+    var Move = NOMOVE;
+
+    var PvMove = ProbePvTable();
+    if (PvMove != NOMOVE) {
+      for (
+        MoveNum = GameBoard.moveListStart[GameBoard.ply];
+        MoveNum < GameBoard.moveListStart[GameBoard.ply + 1];
+        ++MoveNum
+      ) {
+        if (GameBoard.moveList[MoveNum] == PvMove) {
+          GameBoard.moveScores[MoveNum] = 2000000;
+          break;
+        }
+      }
+    }
+
+    for (
+      MoveNum = GameBoard.moveListStart[GameBoard.ply];
+      MoveNum < GameBoard.moveListStart[GameBoard.ply + 1];
+      ++MoveNum
+    ) {
+      PickNextMove(MoveNum);
+
+      Move = GameBoard.moveList[MoveNum];
+
+      if (MakeMove(Move) == false) {
+        continue;
+      }
+      Legal++;
+      Score = -AlphaBeta(-beta, -alpha, depth - 1);
+
+      TakeMove();
+
+      if (SearchController.stop == true) {
+        return 0;
+      }
+
+      if (Score > alpha) {
+        if (Score >= beta) {
+          if (Legal == 1) {
+            SearchController.fhf++;
+          }
+          SearchController.fh++;
+          if ((Move & MFLAGCAP) == 0) {
+            GameBoard.searchKillers[MAXDEPTH + GameBoard.ply] =
+              GameBoard.searchKillers[GameBoard.ply];
+            GameBoard.searchKillers[GameBoard.ply] = Move;
+          }
+          return beta;
+        }
+        if ((Move & MFLAGCAP) == 0) {
+          GameBoard.searchHistory[
+            GameBoard.pieces[fromSQ(Move)] * BRD_SQ_NUM + toSQ(Move)
+          ] += depth * depth;
+        }
+        alpha = Score;
+        BestMove = Move;
+      }
+    }
+
+    if (Legal == 0) {
+      if (InCheck == true) {
+        return -MATE + GameBoard.ply;
+      } else {
+        return 0;
+      }
+    }
+
+    if (alpha != OldAlpha) {
+      StorePvMove(BestMove);
+    }
+
+    return alpha;
+  }
 
   function CheckEndgame() {
     totalMaterial =
@@ -2001,37 +2106,52 @@ const betafishEngine = function() {
   }
 
   function SearchPosition() {
-      let bestMove = NOMOVE;
-      let bestScore = -INFINITE;
-      let currentDepth = 0;
-      let line;
-      let PvNum;
-      let c;
+    var bestMove = NOMOVE;
+    var bestScore = -INFINITE;
+    var currentDepth = 0;
+    var line;
+    var PvNum;
+    var c;
+    ClearForSearch();
 
-      ClearForSearch();
+    for (
+      currentDepth = 1;
+      currentDepth <= SearchController.depth;
+      ++currentDepth
+    ) {
+      bestScore = AlphaBeta(-INFINITE, INFINITE, currentDepth);
 
-      for (currentDepth = 1; currentDepth <= SearchController.depth; ++currentDepth) {
-          bestScore = AlphaBeta(-INFINITE, INFINITE, currentDepth);
-
-          if (SearchController.stop) {
-              break;
-          }
-
-          bestMove = ProbePvTable();
-          line = "D:" + currentDepth + " Best:" + PrMove(bestMove) + " Score:" + bestScore + " nodes:" + SearchController.nodes;
-
-          PvNum = GetPvLine(currentDepth);
-          line += " Pv:";
-          for (c = 0; c < PvNum; ++c) {
-              line += " " + PrMove(GameBoard.PvArray[c]);
-          }
-          if (currentDepth !== 1) {
-              line += " Ordering:" + ((SearchController.fhf / SearchController.fh) * 100).toFixed(2) + "%";
-          }
+      if (SearchController.stop) {
+        break;
       }
 
-      SearchController.best = bestMove;
-      SearchController.thinking = false;
+      bestMove = ProbePvTable();
+      line =
+        "D:" +
+        currentDepth +
+        " Best:" +
+        PrMove(bestMove) +
+        " Score:" +
+        bestScore +
+        " nodes:" +
+        SearchController.nodes;
+
+      PvNum = GetPvLine(currentDepth);
+      line += " Pv:";
+      for (c = 0; c < PvNum; ++c) {
+        line += " " + PrMove(GameBoard.PvArray[c]);
+      }
+      if (currentDepth != 1) {
+        line +=
+          " Ordering:" +
+          ((SearchController.fhf / SearchController.fh) * 100).toFixed(2) +
+          "%";
+      }
+      // console.log(line);
+    }
+
+    SearchController.best = bestMove;
+    SearchController.thinking = false;
   }
 
   function getBestMove() {
